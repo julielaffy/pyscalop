@@ -7,6 +7,7 @@ from .programs import programs
 from .metaprograms import metaprograms
 from .utils import rowcenter, jaccard, jaccard_filter, as_dataframe
 from .plot import set_style, savefig
+from . import signatures
 
 __version__ = "0.1.0"
 
@@ -28,4 +29,5 @@ __all__ = [
     "as_dataframe",
     "set_style",
     "savefig",
+    "signatures",
 ]

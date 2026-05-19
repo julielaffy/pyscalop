@@ -67,6 +67,20 @@ def test_hca_groups_returns_cells():
     assert set(flat).issubset(set(m.columns))
 
 
+def test_thermogenic_signatures_load():
+    via_attr = ps.signatures.thermogenic         # PEP 562 attribute access
+    via_load = ps.signatures.load("thermogenic")  # function call by name
+    assert via_attr is via_load                   # both go through the cache
+    assert "lit.thermogenic" in via_attr
+    excluded = {
+        "REACTOME_White_adipocyte_differentiation_R-HSA-381340",
+        "C5.GOBP_REGULATION_OF_BROWN_FAT_CELL_DIFFERENTIATION",
+        "C5.GOBP_POSITIVE_REGULATION_OF_BROWN_FAT_CELL_DIFFERENTIATION",
+    }
+    assert not (excluded & via_attr.keys())
+    assert "thermogenic" in ps.signatures.list_available()
+
+
 def test_programs_finds_planted_cluster():
     m = _toy_matrix()
     # give it the true partition so we don't rely on clustering recovering it

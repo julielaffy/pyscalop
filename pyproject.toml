@@ -31,6 +31,9 @@ Repository = "https://github.com/julielaffy/pyscalop"
 [tool.setuptools.packages.find]
 include = ["pyscalop*"]
 
+[tool.setuptools.package-data]
+"pyscalop.signatures_data" = ["*.gmt"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

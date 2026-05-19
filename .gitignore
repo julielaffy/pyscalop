@@ -22,3 +22,4 @@ htmlcov/
 
 data/*
 !data/.gitkeep
+!data/thermogenic_raw.xlsx
