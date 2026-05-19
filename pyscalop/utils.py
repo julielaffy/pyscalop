@@ -37,6 +37,35 @@ def rowcenter(m: pd.DataFrame) -> pd.DataFrame:
     return m.sub(m.mean(axis=1), axis=0)
 
 
+def aggr_gene_expr(m, is_bulk: bool = False, skipna: bool = True) -> pd.Series:
+    """Aggregate per-gene expression across cells/samples (port of scalop::aggr_gene_expr).
+
+    Un-logs the input, averages across columns per row, and re-logs in bulk
+    form (``log2(mean_cpm + 1)``). Used for expression-cutoff filtering, where
+    naive row means on log-CPM values systematically underestimate expression
+    of genes with skewed (some-cells-high, many-cells-low) distributions.
+
+    Parameters
+    ----------
+    m : DataFrame | ndarray | AnnData
+        genes x cells (or genes x samples for bulk). Values assumed to be
+        ``log2(CPM/10 + 1)`` for single-cell, ``log2(CPM + 1)`` for bulk.
+    is_bulk : bool, default False
+        Equivalent to R's ``isBulk``. False (sc) uses CPM scaling factor 10;
+        True (bulk) uses 1.
+    skipna : bool, default True
+        Equivalent to R's ``na.rm``. Skip NaN when averaging across cells.
+
+    Returns
+    -------
+    pd.Series of aggregated per-gene values in ``log2(mean_cpm + 1)`` form.
+    """
+    m = as_dataframe(m)
+    x = 1 if is_bulk else 10
+    rowmeans = ((2 ** m - 1) * x).mean(axis=1, skipna=skipna)
+    return np.log2(rowmeans + 1)
+
+
 def colcenter(m: pd.DataFrame) -> pd.DataFrame:
     return m.sub(m.mean(axis=0), axis=1)
 

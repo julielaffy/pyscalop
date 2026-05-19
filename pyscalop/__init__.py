@@ -5,11 +5,11 @@ from .dea import dea
 from .hca import hca, hca_groups, hca_order
 from .programs import programs
 from .metaprograms import metaprograms
-from .utils import rowcenter, jaccard, jaccard_filter, as_dataframe
+from .utils import rowcenter, jaccard, jaccard_filter, as_dataframe, aggr_gene_expr
 from .plot import set_style, savefig
 from . import signatures
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "sig_scores",
@@ -27,6 +27,7 @@ __all__ = [
     "jaccard",
     "jaccard_filter",
     "as_dataframe",
+    "aggr_gene_expr",
     "set_style",
     "savefig",
     "signatures",

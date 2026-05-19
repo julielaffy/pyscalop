@@ -67,6 +67,36 @@ def test_hca_groups_returns_cells():
     assert set(flat).issubset(set(m.columns))
 
 
+def test_aggr_gene_expr_sc():
+    # gene A: m = [0, 1, 2]
+    #   un-log: 2^m - 1 = [0, 1, 3]
+    #   scale x10:       [0, 10, 30]
+    #   mean = 40/3 ≈ 13.333  →  log2(14.333) ≈ 3.841
+    # gene B: m = [3, 3, 3]
+    #   un-log * 10 = [70, 70, 70]; mean = 70  →  log2(71) ≈ 6.150
+    m = pd.DataFrame([[0.0, 1.0, 2.0], [3.0, 3.0, 3.0]],
+                     index=["A", "B"], columns=["c1", "c2", "c3"])
+    out = ps.aggr_gene_expr(m)
+    assert np.isclose(out["A"], np.log2(40 / 3 + 1), atol=1e-6)
+    assert np.isclose(out["B"], np.log2(70.0 + 1), atol=1e-6)
+
+
+def test_aggr_gene_expr_bulk():
+    # is_bulk=True uses scaling factor 1, so values aren't *10'd
+    # gene A: 2^m - 1 = [0, 1, 3]; mean = 4/3  →  log2(4/3 + 1) ≈ log2(7/3)
+    m = pd.DataFrame([[0.0, 1.0, 2.0]], index=["A"], columns=["s1", "s2", "s3"])
+    out = ps.aggr_gene_expr(m, is_bulk=True)
+    assert np.isclose(out["A"], np.log2(4 / 3 + 1), atol=1e-6)
+
+
+def test_aggr_gene_expr_skipna():
+    m = pd.DataFrame([[0.0, np.nan, 2.0]], index=["A"], columns=["c1", "c2", "c3"])
+    # skipna=True (default): mean of [0, 30] = 15  →  log2(16) = 4.0
+    assert np.isclose(ps.aggr_gene_expr(m)["A"], np.log2(16.0), atol=1e-6)
+    # skipna=False: NaN propagates
+    assert np.isnan(ps.aggr_gene_expr(m, skipna=False)["A"])
+
+
 def test_thermogenic_signatures_load():
     via_attr = ps.signatures.thermogenic         # PEP 562 attribute access
     via_load = ps.signatures.load("thermogenic")  # function call by name
