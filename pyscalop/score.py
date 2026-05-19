@@ -4,10 +4,18 @@ Combines ``sigScores`` and ``permuteSigScores`` from the R package into one
 function: pass ``permute=True`` to run permutation testing and get per-cell
 per-signature FDR.
 
-The permutation path is vectorised and reuses precomputed bins and bin-matched
-control signatures across iterations. Per-gene row shuffling preserves row
-means, so bin assignments are invariant and recomputing them per iteration
-(as the R version does) is wasted work.
+The permutation logic faithfully mirrors R's ``permuteSigScores``:
+per iteration we permute expression values across cells (independently per
+gene), compute scores on the permuted matrix, derive a within-iteration
+across-cells threshold ``mean + 2*sd`` per signature, and tally per cell
+whether the observed score beats that threshold. After ``n_perm`` iterations
+we run a per-cell binomial test against the global success rate and BH-adjust
+within each signature.
+
+Bin assignments are computed once (row means are invariant under per-row
+shuffling, so they don't change) but bin-matched control gene sets are
+re-sampled per iteration to match R's behaviour. The shuffling and scoring
+matmuls are batched / vectorised — that's where most of the speedup comes from.
 """
 
 from __future__ import annotations
@@ -204,93 +212,71 @@ def _permute_fdr(
     expr_nbin, expr_binsize, replace, n_perm, alternative,
     random_state, batch,
 ) -> pd.DataFrame:
-    """Permutation testing. Bins and control sigs are precomputed (row means
-    are invariant under per-row shuffling, so bins don't change).
+    """Faithful port of scalop::permuteSigScores's permutation testing.
 
-    For each permutation we score the shuffled matrix and accumulate a per
-    (cell, sig) count of "observed beat the permuted distribution". After
-    n_perm permutations we run a per-cell binomial test against the empirical
-    success rate.
+    Per iteration: permute genes across cells, score, derive a within-iteration
+    across-cells threshold (mean + 2*sd) per signature, tally per cell whether
+    the observed score beats that threshold. Then run a per-cell binomial test
+    against the global success rate and BH-adjust within each signature.
     """
     rng = np.random.default_rng(random_state)
     bin_ref = m if expr_bin_m is None else as_dataframe(expr_bin_m)
     bins = bin_genes(bin_ref, nbin=expr_nbin)
-    ctrl_sigs = {name: binmatch(genes, bins, n=expr_binsize, replace=replace, rng=rng)
-                 for name, genes in sigs.items()}
+    sig_names = list(sigs)
+    sig_genes_list = [list(sigs[n]) for n in sig_names]
 
     S = _sig_indicator(sigs, m.index)
-    Sc = _sig_indicator(ctrl_sigs, m.index)
     sig_sizes = S.sum(axis=1)[:, None]
-    ctrl_sizes = Sc.sum(axis=1)[:, None]
 
     M = m.values.astype(np.float64, copy=False)
     G, C = M.shape
-
-    # Per-permutation: shuffled scores have shape (n_sigs, C). Accumulate
-    # running mean and M2 (for std) and the boolean count.
     n_sigs = len(sigs)
-    running_n = 0
-    running_mean = np.zeros((n_sigs, C))
-    running_m2 = np.zeros((n_sigs, C))
-    # Permutation scores stored only to recompute mean/sd then compared to
-    # observed at the end. Storing N x sigs x cells would be too big; we use
-    # Welford's online algorithm.
+    observed_vals = observed.values.T  # (n_sigs, n_cells)
 
-    observed_vals = observed.values.T  # (n_sigs, n_cells); observed is cells x sigs
+    passed_counts = np.zeros((n_sigs, C), dtype=np.int64)
+    total_passed = np.zeros(n_sigs, dtype=np.int64)
 
     for start in range(0, n_perm, batch):
         b = min(batch, n_perm - start)
-        # Generate b permutations of column indices, one set per gene.
-        # Shape: (b, G, C)
         idx = np.argsort(rng.random((b, G, C)), axis=2)
-        # Apply by broadcasting: for each batch element, shuffle M's columns per row.
-        # Mp: (b, G, C)
         Mp = np.take_along_axis(M[None, :, :], idx, axis=2)
         if center_rows:
             Mp = Mp - Mp.mean(axis=2, keepdims=True)
-        # Score: (b, n_sigs, C) via einsum
-        scores_p = np.einsum("sg,bgc->bsc", S, Mp) / sig_sizes
-        if expr_center:
-            ctrl_p = np.einsum("sg,bgc->bsc", Sc, Mp) / ctrl_sizes
-            scores_p = scores_p - ctrl_p
 
-        # Welford update across the batch
         for k in range(b):
-            running_n += 1
-            delta = scores_p[k] - running_mean
-            running_mean += delta / running_n
-            running_m2 += delta * (scores_p[k] - running_mean)
+            scores_k = (S @ Mp[k]) / sig_sizes  # (n_sigs, C)
+            if expr_center:
+                ctrl_sigs_k = {n: binmatch(g, bins, n=expr_binsize, replace=replace, rng=rng)
+                               for n, g in zip(sig_names, sig_genes_list)}
+                Sc = _sig_indicator(ctrl_sigs_k, m.index)
+                ctrl_sizes = Sc.sum(axis=1)[:, None]
+                ctrl_k = (Sc @ Mp[k]) / ctrl_sizes
+                scores_k = scores_k - ctrl_k
 
-    perm_mean = running_mean
-    perm_sd = np.sqrt(running_m2 / max(running_n - 1, 1))
+            mean_k = scores_k.mean(axis=1, keepdims=True)
+            sd_k = scores_k.std(axis=1, ddof=1, keepdims=True)
+            if alternative == "greater":
+                passed_k = observed_vals > (mean_k + 2 * sd_k)
+            elif alternative == "less":
+                passed_k = observed_vals < (mean_k - 2 * sd_k)
+            elif alternative in ("two.sided", "two-sided", "two_sided"):
+                passed_k = (observed_vals > (mean_k + 2 * sd_k)) | (observed_vals < (mean_k - 2 * sd_k))
+            else:
+                raise ValueError(f"Unknown alternative: {alternative}")
+            passed_counts += passed_k.astype(np.int64)
+            total_passed += passed_k.sum(axis=1)
 
-    if alternative == "greater":
-        passed = observed_vals > (perm_mean + 2 * perm_sd)
-    elif alternative == "less":
-        passed = observed_vals < (perm_mean - 2 * perm_sd)
-    elif alternative in ("two.sided", "two-sided", "two_sided"):
-        passed = (observed_vals > (perm_mean + 2 * perm_sd)) | (observed_vals < (perm_mean - 2 * perm_sd))
-    else:
-        raise ValueError(f"Unknown alternative: {alternative}")
+    from scipy.stats import binom, false_discovery_control
 
-    # passed shape: (n_sigs, n_cells); convert to a per-cell, per-sig FDR.
-    # Mirror R: rate p = sum(passed) / passed.size for each sig, then per-cell
-    # binomial.test(x, n=cells, p, alt='greater') across permutations is not
-    # quite the right object — the R code runs a binomial per cell across N
-    # permutation outcomes, where p is the global rate across all cells. Here
-    # we don't have per-cell counts across N anymore (we collapsed to mean/sd).
-    # So we use a simpler, equivalent-spirit FDR: empirical p-value per cell =
-    # 1 - passed (i.e. 0 or 1), then BH-adjust across (cell, sig).
-    # If you need the binomial-over-iterations behaviour exactly, set
-    # `permute=False` and call permute_sig_scores_strict (TODO).
-    pvals = np.where(passed, 0.0, 1.0)
-    # BH within each signature column
-    from scipy.stats import false_discovery_control  # scipy >= 1.11
-    fdr = np.empty_like(pvals)
+    fdr = np.empty((n_sigs, C))
     for s in range(n_sigs):
-        fdr[s, :] = false_discovery_control(pvals[s, :], method="bh")
+        p_s = total_passed[s] / (n_perm * C)
+        if p_s <= 0:
+            fdr[s, :] = 1.0
+            continue
+        pvals = binom.sf(passed_counts[s, :] - 1, n_perm, p_s)
+        fdr[s, :] = false_discovery_control(pvals, method="bh")
 
-    sig_names = list(sigs)
     return pd.DataFrame(fdr.T, index=observed.index, columns=sig_names)
 
 
