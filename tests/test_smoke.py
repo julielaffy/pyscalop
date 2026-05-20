@@ -10,13 +10,14 @@ import pyscalop as ps
 
 
 def _toy_matrix(n_genes: int = 200, n_cells: int = 80, seed: int = 0) -> pd.DataFrame:
+    """Returns a cells × genes DataFrame (rows = cells, columns = genes)."""
     rng = np.random.default_rng(seed)
     genes = [f"g{i:04d}" for i in range(n_genes)]
     cells = [f"c{i:03d}" for i in range(n_cells)]
-    M = rng.normal(loc=2.0, scale=1.0, size=(n_genes, n_cells))
+    M = rng.normal(loc=2.0, scale=1.0, size=(n_cells, n_genes))
     # plant a real signal: first 20 genes elevated in first 30 cells
-    M[:20, :30] += 3.0
-    return pd.DataFrame(M, index=genes, columns=cells)
+    M[:30, :20] += 3.0
+    return pd.DataFrame(M, index=cells, columns=genes)
 
 
 def test_sig_scores_raw():
@@ -25,8 +26,8 @@ def test_sig_scores_raw():
     sigs = {"planted": [f"g{i:04d}" for i in range(20)]}
     scores = ps.sig_scores(m, sigs, expr_center=False)
     assert scores.shape == (80, 1)
-    high = scores.loc[m.columns[:30], "planted"].mean()
-    low = scores.loc[m.columns[30:], "planted"].mean()
+    high = scores.loc[m.index[:30], "planted"].mean()
+    low = scores.loc[m.index[30:], "planted"].mean()
     assert high > low
 
 
@@ -37,8 +38,8 @@ def test_sig_scores_with_controls():
             "random":  [f"g{i:04d}" for i in range(500, 520)]}
     scores = ps.sig_scores(m, sigs, expr_nbin=30, expr_binsize=50, random_state=0)
     assert scores.shape == (80, 2)
-    high = scores.loc[m.columns[:30], "planted"].mean()
-    low = scores.loc[m.columns[30:], "planted"].mean()
+    high = scores.loc[m.index[:30], "planted"].mean()
+    low = scores.loc[m.index[30:], "planted"].mean()
     assert high > low
 
 
@@ -52,7 +53,7 @@ def test_sig_scores_permute():
 
 def test_dea_runs():
     m = _toy_matrix()
-    cells_a = list(m.columns[:30])
+    cells_a = list(m.index[:30])
     df = ps.dea(m, group=cells_a, lfc=None, p=None)
     assert {"gene", "foldchange", "p", "p_adj"}.issubset(df.columns)
     # planted genes should have positive fold changes
@@ -64,33 +65,36 @@ def test_hca_groups_returns_cells():
     m = _toy_matrix()
     groups = ps.hca_groups(m, k=3, min_size=2, max_size=0.9)
     flat = [c for g in groups for c in g]
-    assert set(flat).issubset(set(m.columns))
+    assert set(flat).issubset(set(m.index))
 
 
 def test_aggr_gene_expr_sc():
-    # gene A: m = [0, 1, 2]
-    #   un-log: 2^m - 1 = [0, 1, 3]
-    #   scale x10:       [0, 10, 30]
+    # gene A: across 3 cells = [0, 1, 2]
+    #   un-log: 2^m - 1 = [0, 1, 3]; scale x10 = [0, 10, 30]
     #   mean = 40/3 ≈ 13.333  →  log2(14.333) ≈ 3.841
-    # gene B: m = [3, 3, 3]
+    # gene B: across 3 cells = [3, 3, 3]
     #   un-log * 10 = [70, 70, 70]; mean = 70  →  log2(71) ≈ 6.150
-    m = pd.DataFrame([[0.0, 1.0, 2.0], [3.0, 3.0, 3.0]],
-                     index=["A", "B"], columns=["c1", "c2", "c3"])
+    # cells × genes: 3 cells (rows), 2 genes A and B (columns).
+    m = pd.DataFrame(
+        [[0.0, 3.0], [1.0, 3.0], [2.0, 3.0]],
+        index=["c1", "c2", "c3"], columns=["A", "B"],
+    )
     out = ps.aggr_gene_expr(m)
     assert np.isclose(out["A"], np.log2(40 / 3 + 1), atol=1e-6)
     assert np.isclose(out["B"], np.log2(70.0 + 1), atol=1e-6)
 
 
 def test_aggr_gene_expr_bulk():
-    # is_bulk=True uses scaling factor 1, so values aren't *10'd
+    # is_bulk=True uses scaling factor 1; samples × genes (1 gene A across 3 samples).
     # gene A: 2^m - 1 = [0, 1, 3]; mean = 4/3  →  log2(4/3 + 1) ≈ log2(7/3)
-    m = pd.DataFrame([[0.0, 1.0, 2.0]], index=["A"], columns=["s1", "s2", "s3"])
+    m = pd.DataFrame([[0.0], [1.0], [2.0]], index=["s1", "s2", "s3"], columns=["A"])
     out = ps.aggr_gene_expr(m, is_bulk=True)
     assert np.isclose(out["A"], np.log2(4 / 3 + 1), atol=1e-6)
 
 
 def test_aggr_gene_expr_skipna():
-    m = pd.DataFrame([[0.0, np.nan, 2.0]], index=["A"], columns=["c1", "c2", "c3"])
+    # cells × genes: 3 cells, 1 gene A; middle cell has NaN.
+    m = pd.DataFrame([[0.0], [np.nan], [2.0]], index=["c1", "c2", "c3"], columns=["A"])
     # skipna=True (default): mean of [0, 30] = 15  →  log2(16) = 4.0
     assert np.isclose(ps.aggr_gene_expr(m)["A"], np.log2(16.0), atol=1e-6)
     # skipna=False: NaN propagates

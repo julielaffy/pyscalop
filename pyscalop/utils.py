@@ -6,11 +6,26 @@ import numpy as np
 import pandas as pd
 
 
-def as_dataframe(m, gene_axis: str = "rows") -> pd.DataFrame:
-    """Coerce m to a genes-by-cells DataFrame.
+def as_dataframe(m, gene_axis: str = "cols") -> pd.DataFrame:
+    """Coerce m to a genes-by-cells DataFrame for pyscalop internals.
 
-    Accepts DataFrame, ndarray, or AnnData. AnnData is transposed since its
-    convention is cells-by-genes.
+    pyscalop's public API expects matrices in the **cells × genes** orientation
+    (rows = cells, columns = genes) — the standard Python single-cell
+    convention used by scanpy / AnnData. This function transposes user input
+    to the **genes × cells** orientation used internally.
+
+    Parameters
+    ----------
+    m : DataFrame | ndarray | AnnData
+        Expression matrix. Assumed cells × genes by default; pass
+        ``gene_axis="rows"`` to indicate a genes × cells input.
+    gene_axis : {"cols", "rows"}, default "cols"
+        Which axis of ``m`` holds gene labels.
+
+    Returns
+    -------
+    pd.DataFrame
+        Always genes × cells (the internal convention).
     """
     try:
         import anndata as ad
@@ -21,13 +36,14 @@ def as_dataframe(m, gene_axis: str = "rows") -> pd.DataFrame:
         x = m.X
         if hasattr(x, "toarray"):
             x = x.toarray()
+        # AnnData is cells × genes — transpose to genes × cells.
         return pd.DataFrame(x.T, index=m.var_names, columns=m.obs_names)
 
     if isinstance(m, pd.DataFrame):
         return m if gene_axis == "rows" else m.T
 
     if isinstance(m, np.ndarray):
-        return pd.DataFrame(m)
+        return pd.DataFrame(m if gene_axis == "rows" else m.T)
 
     raise TypeError(f"Unsupported matrix type: {type(m).__name__}")
 
@@ -55,8 +71,10 @@ def aggr_gene_expr(m, is_bulk: bool = False, skipna: bool = True) -> pd.Series:
     Parameters
     ----------
     m : DataFrame | ndarray | AnnData
-        genes x cells (or genes x samples for bulk). Values assumed to be
-        ``log2(CPM/10 + 1)`` for single-cell, ``log2(CPM + 1)`` for bulk.
+        Expression matrix. **cells × genes** by default (rows = cells,
+        columns = genes — scanpy / AnnData convention). For bulk data,
+        samples × genes. Values assumed to be ``log2(CPM/10 + 1)`` for
+        single-cell or ``log2(CPM + 1)`` for bulk.
     is_bulk : bool, default False
         Equivalent to R's ``isBulk``. False (sc) uses CPM scaling factor 10;
         True (bulk) uses 1.

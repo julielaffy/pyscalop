@@ -40,12 +40,13 @@ SEED = 42
 
 
 def make_synthetic() -> tuple[pd.DataFrame, dict[str, list[str]]]:
+    """Returns a cells × genes DataFrame (pyscalop public-API convention)."""
     rng = np.random.default_rng(SEED)
-    M = rng.normal(loc=2.0, scale=1.0, size=(N_GENES, N_CELLS))
-    M[:N_PLANTED_GENES, :N_PLANTED_CELLS] += SIGNAL
+    M = rng.normal(loc=2.0, scale=1.0, size=(N_CELLS, N_GENES))
+    M[:N_PLANTED_CELLS, :N_PLANTED_GENES] += SIGNAL
     genes = [f"g{i:04d}" for i in range(N_GENES)]
     cells = [f"c{i:03d}" for i in range(N_CELLS)]
-    m = pd.DataFrame(M, index=genes, columns=cells)
+    m = pd.DataFrame(M, index=cells, columns=genes)
     sigs = {
         "planted": [f"g{i:04d}" for i in range(N_PLANTED_GENES)],
         "random":  [f"g{i:04d}" for i in range(150, 150 + N_PLANTED_GENES)],
@@ -123,7 +124,8 @@ def compare_permutation(r_perm: pd.DataFrame, py_perm: pd.DataFrame,
 def main() -> None:
     IO.mkdir(parents=True, exist_ok=True)
     m, sigs = make_synthetic()
-    m.to_csv(IO / "matrix.tsv", sep="\t")
+    # R's scalop expects genes × cells, so transpose on the way out.
+    m.T.to_csv(IO / "matrix.tsv", sep="\t")
     with open(IO / "sigs.tsv", "w") as f:
         for name, gs in sigs.items():
             f.write(name + "\t" + "\t".join(gs) + "\n")

@@ -33,7 +33,8 @@ def dea(
     Parameters
     ----------
     m : DataFrame | ndarray | AnnData
-        Expression matrix, genes x cells (log-normalised).
+        Expression matrix, **cells × genes** (rows = cells, columns = genes —
+        scanpy / AnnData convention), log-normalised.
     group, group2
         Either a single list of cell IDs (compares vs the rest of m's columns,
         or vs group2 if provided) or a dict of named groups.

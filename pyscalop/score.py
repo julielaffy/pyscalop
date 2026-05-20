@@ -56,8 +56,9 @@ def sig_scores(
     Parameters
     ----------
     m : DataFrame | ndarray | AnnData
-        Expression matrix of genes x cells. Not row-centered (will be centered
-        internally if ``center_rows=True``).
+        Expression matrix, **cells × genes** (rows = cells, columns = genes —
+        scanpy / AnnData convention). Not gene-centered; will be centered
+        internally if ``center_rows=True``.
     sigs : list[str] or dict[str, list[str]]
         A single signature (list of gene names) or a dict of named signatures.
     groups : dict[str, list[str]], optional
