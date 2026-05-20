@@ -9,7 +9,7 @@ from .utils import rowcenter, jaccard, jaccard_filter, as_dataframe, aggr_gene_e
 from .plot import set_style, savefig
 from . import signatures
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = [
     "sig_scores",

@@ -111,6 +111,22 @@ def test_thermogenic_signatures_load():
     assert "thermogenic" in ps.signatures.list_available()
 
 
+def test_rowcenter_actually_centers_rows():
+    """Regression test: some pandas+numpy version combos make
+    DataFrame.sub(series, axis=0) silently corrupt data. rowcenter must use
+    numpy ops directly so each row's mean is exactly 0 after centering."""
+    rng = np.random.default_rng(0)
+    m = pd.DataFrame(rng.normal(loc=5.0, scale=3.0, size=(200, 100)))
+    mc = ps.rowcenter(m)
+    # every row's mean must be ~0
+    row_means = mc.mean(axis=1)
+    assert np.abs(row_means.values).max() < 1e-10, (
+        f"rowcenter failed: row mean max|abs|={np.abs(row_means.values).max():.2e}"
+    )
+    # total variance reduced (we removed across-row variance)
+    assert mc.values.std() < m.values.std()
+
+
 def test_programs_finds_planted_cluster():
     m = _toy_matrix()
     # give it the true partition so we don't rely on clustering recovering it

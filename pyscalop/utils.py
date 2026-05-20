@@ -33,8 +33,15 @@ def as_dataframe(m, gene_axis: str = "rows") -> pd.DataFrame:
 
 
 def rowcenter(m: pd.DataFrame) -> pd.DataFrame:
-    """Subtract row means (gene-wise centering)."""
-    return m.sub(m.mean(axis=1), axis=0)
+    """Subtract row means (gene-wise centering).
+
+    Uses numpy ops directly because pandas's ``DataFrame.sub(series, axis=0)``
+    silently produces garbage on some pandas + numpy version combos
+    (e.g. pandas 2.3.3 + numpy 2.4.x). See pyscalop README / tests.
+    """
+    arr = m.to_numpy(copy=False)
+    centered = arr - arr.mean(axis=1, keepdims=True)
+    return pd.DataFrame(centered, index=m.index, columns=m.columns)
 
 
 def aggr_gene_expr(m, is_bulk: bool = False, skipna: bool = True) -> pd.Series:
@@ -67,7 +74,11 @@ def aggr_gene_expr(m, is_bulk: bool = False, skipna: bool = True) -> pd.Series:
 
 
 def colcenter(m: pd.DataFrame) -> pd.DataFrame:
-    return m.sub(m.mean(axis=0), axis=1)
+    """Subtract column means (cell-wise centering). See rowcenter for the
+    rationale behind using numpy ops directly."""
+    arr = m.to_numpy(copy=False)
+    centered = arr - arr.mean(axis=0, keepdims=True)
+    return pd.DataFrame(centered, index=m.index, columns=m.columns)
 
 
 def jaccard(a, b) -> float:
